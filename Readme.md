@@ -1,64 +1,87 @@
-# 🚀 AWS Automated Cloud Dev Environment (Cost-Optimized)
-
-A fully automated, cost-optimized Cloud Development Environment (Cloud IDE) built with **Python, Boto3, and AWS EC2 Spot Instances**. This internal tool provisions a powerful ephemeral remote workspace, attaches persistent storage, configures local SSH, and launches VS Code automatically—all with a single click from a custom Windows GUI.
+# AWS Automated Cloud Development Environment
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
 ![AWS Boto3](https://img.shields.io/badge/AWS-Boto3-FF9900.svg)
 ![Cost Optimization](https://img.shields.io/badge/Cost_Optimization-Spot_Instances-27AE60.svg)
 
-## 💡 The Problem & The Solution
+A fully automated, cost-optimized Cloud Development Environment built with **Python, Boto3, and AWS EC2 Spot Instances**. The tool provisions an ephemeral remote workspace, attaches persistent storage, configures local SSH, and launches VS Code — all from a single click on a custom Windows GUI.
 
-**The Problem:** Running powerful On-Demand EC2 instances for development is expensive. Furthermore, assigning an Elastic IP to maintain a static connection now incurs an hourly charge ($0.005/hr) regardless of instance state, adding unnecessary overhead for a development environment.
+<p align="center">
+  <img src="./images/gui_logs.png" alt="AWS DevOps Dashboard GUI" width="800"/>
+</p>
 
-**The Solution:**
-This project utilizes a **Stateless Compute / Persistent Storage** architecture. 
-- **Compute:** Uses highly discounted **EC2 Spot Instances** (`c5a.xlarge`), saving up to 70-90% on compute costs.
-- **Storage:** Keeps all project data safe on a detached **persistent 20GB EBS Volume**.
-- **Networking:** Eliminates the need for Elastic IPs. The Python script dynamically fetches the ephemeral Public IP upon launch and updates the local `~/.ssh/config` file instantly.
+---
 
-## 🏗️ Architecture & Workflow
+## Background
 
-When the "START DEV" button is clicked on the GUI, the script triggers the following workflow:
-<!-- display architecture diagram from ./architecture.png -->
-![Architecture Illustration](./architecture.png)
+Running On-Demand EC2 instances for day-to-day development is costly. On top of compute charges, assigning an Elastic IP to maintain a static connection adds an hourly fee ($0.005/hr) regardless of whether the instance is running — an unnecessary expense for a development workflow.
 
-✨ Key Features
-Custom GUI Dashboard: Built with customtkinter for a sleek, dark-mode interface to manage the environment without logging into the AWS Console.
+This project addresses both problems through a **Stateless Compute / Persistent Storage** architecture:
 
-Automated Spot Provisioning: Spawns instances from an AWS Launch Template with predefined security groups and configurations.
+- **Compute** — EC2 Spot Instances (`c5a.xlarge`) reduce costs by 70–90% compared to On-Demand pricing.
+- **Storage** — All project data lives on a detached, persistent 20GB EBS Volume that survives instance termination.
+- **Networking** — Elastic IPs are eliminated entirely. On each launch, the script dynamically retrieves the instance's ephemeral public IP and rewrites the local `~/.ssh/config` automatically.
 
-Dynamic Volume Attachment: Automatically finds and attaches your persistent EBS volume to the newly spawned Spot Instance.
+---
 
-Auto-Mounting (Bash User Data): The EC2 instance is pre-configured via User Data to automatically format (if new) and mount the EBS volume to /workspace upon boot.
+## Architecture & Workflow
 
-Local SSH Automation: Automatically rewrites the Windows ~/.ssh/config file with the instance's new ephemeral Public IP.
+Clicking the **Start Dev** button on the dashboard triggers the following sequence:
 
-Detached VS Code Launch: Programmatically launches VS Code directly into the Remote SSH workspace using subprocess breakaway techniques, completely detached from the dashboard process.
+![Architecture Illustration](./images/architecture.png)
 
-One-Click Termination: A "STOP DEV" button instantly terminates the Spot instance to halt billing, safely leaving the detached EBS volume intact for the next session.
+---
 
-🛠️ Tech Stack & Prerequisites
-Python 3.1x (Libraries: boto3, customtkinter)
+## Key Features
 
-AWS CLI configured with appropriate IAM permissions (ec2:RunInstances, ec2:AttachVolume, ec2:Describe*, ec2:TerminateInstances).
+**Custom GUI Dashboard**
+Built with `customtkinter`, the dark-mode interface lets you manage the full lifecycle of the environment without touching the AWS Console.
 
-AWS Infrastructure setup:
+**Automated Spot Provisioning**
+Instances are launched from a pre-configured AWS Launch Template that encodes the desired instance type, security groups, and IAM role.
 
-An existing unattached EBS Volume (e.g., 20GB gp3).
+**Dynamic Volume Attachment**
+On every launch, the script locates the persistent EBS volume by ID and attaches it to the newly provisioned Spot Instance automatically.
 
-An AWS Launch Template configured to request Spot Instances.
+**Auto-Mounting via User Data**
+The EC2 instance runs a bash User Data script at boot that formats the volume (if it's new) and mounts it to `/workspace`, requiring no manual intervention.
 
-VS Code with the "Remote - SSH" extension installed.
+**Local SSH Automation**
+The `~/.ssh/config` file on the local Windows machine is rewritten on every launch with the current ephemeral public IP, so VS Code connects without any manual edits.
 
-📝 AWS User Data Script (Instance Preparation)
-To make this work seamlessly, the Launch Template includes the following bash script to ensure the persistent volume is mounted automatically when the Spot instance boots:
+**Detached VS Code Launch**
+VS Code is opened into the Remote SSH workspace using subprocess breakaway techniques, fully decoupled from the dashboard process so closing the GUI won't interrupt the editor session.
+
+**One-Click Teardown**
+The **Stop Dev** button terminates the Spot Instance immediately, halting all compute billing while leaving the EBS volume safely detached and ready for the next session.
+
+---
+
+## Tech Stack & Prerequisites
+
+- Python 3.10+ with `boto3` and `customtkinter`
+- AWS CLI configured with an IAM profile that has the following permissions:
+  - `ec2:RunInstances`
+  - `ec2:AttachVolume`
+  - `ec2:Describe*`
+  - `ec2:TerminateInstances`
+- An existing, unattached EBS Volume (20GB `gp3` recommended)
+- An AWS Launch Template configured for Spot Instance requests
+- VS Code with the **Remote - SSH** extension installed
+
+---
+
+## AWS User Data Script
+
+The Launch Template includes the following bash script. It runs once at boot to ensure the persistent volume is mounted and the workspace is ready before the first SSH connection.
+
 ```bash
 #!/bin/bash
-# 1. Create the mount point directory
+# Create the mount point
 mkdir -p /workspace
 
-# 2. Add the volume to /etc/fstab using its UUID so it survives reboots
-# (Replace UUID with your actual volume UUID)
+# Register the volume in /etc/fstab by UUID so it persists across reboots
+# Replace YOUR-VOLUME-UUID-HERE with your actual volume UUID
 if ! grep -q "YOUR-VOLUME-UUID-HERE" /etc/fstab; then
   echo "UUID=YOUR-VOLUME-UUID-HERE  /workspace  ext4  defaults,nofail  0  2" >> /etc/fstab
 fi
@@ -66,25 +89,54 @@ fi
 systemctl daemon-reload
 chown -R ubuntu:ubuntu /workspace
 
-# 3. Add auto-mount and directory change to bashrc for SSH sessions
+# Ensure the volume is mounted and the working directory is set for SSH sessions
 if ! grep -q "sudo mount -a" /home/ubuntu/.bashrc; then
   echo "sudo mount -a 2>/dev/null" >> /home/ubuntu/.bashrc
   echo "cd /workspace" >> /home/ubuntu/.bashrc
 fi
 ```
-🚀 Installation & Usage
-Clone this repository.
 
-Install requirements: pip install boto3 customtkinter
+**AWS Console — EC2 Instance**
 
-Update the VOLUME_ID and TEMPLATE_NAME variables in the scripts with your AWS resource IDs.
+<p align="center">
+  <img src="./images/ec2.png" alt="EC2 Instance Console" width="800"/>
+</p>
 
-Run python ExpoCloud-Dashboard.py to open the GUI.
+**AWS Console — EBS Volumes**
 
-(Optional) Convert to a standalone executable using auto-py-to-exe for a true desktop app experience.
+<p align="center">
+  <img src="./images/volumes.png" alt="EBS Volumes Console" width="800"/>
+</p>
 
-Author: Ahmed Abd Elmohsen
+Once the instance is running, the script attaches the EBS volume and the User Data script handles mounting it to `/workspace`. From that point, the environment is fully persistent — you can stop and restart sessions without losing any state.
 
-Portfolio: ([ahmed-abd-elmohsen.tech](https://www.ahmed-abd-elmohsen.tech))
+VS Code is then launched via Remote SSH, connecting directly to the new instance using the updated configuration.
 
-LinkedIn: Connect with me ([LinkedIn](https://www.linkedin.com/in/dev-ahmed-abdelmohsen/))
+<p align="center">
+  <img src="./images/vscode.png" alt="VS Code Remote SSH Session" width="800"/>
+</p>
+
+---
+
+## Installation & Usage
+
+1. Clone this repository.
+2. Install dependencies:
+   ```bash
+   pip install boto3 customtkinter
+   ```
+3. Open `ExpoCloud-Dashboard.py` and update the `VOLUME_ID` and `TEMPLATE_NAME` variables with your AWS resource identifiers.
+4. Launch the dashboard:
+   ```bash
+   python ExpoCloud-Dashboard.py
+   ```
+5. Optionally, convert to a standalone Windows executable using [auto-py-to-exe](https://github.com/brentvollebregt/auto-py-to-exe) for distribution without a Python environment.
+
+---
+
+## Author
+
+**Ahmed Abd Elmohsen**
+
+- Portfolio: [ahmed-abd-elmohsen.tech](https://www.ahmed-abd-elmohsen.tech)
+- LinkedIn: [dev-ahmed-abdelmohsen](https://www.linkedin.com/in/dev-ahmed-abdelmohsen/)
